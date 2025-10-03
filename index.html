@@ -8,6 +8,7 @@
       .then(() => console.log("Service Worker registered"));
   }
 </script>
+
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -26,7 +27,9 @@ button{margin:5px; padding:6px 12px;}
 
 <label>Title:<br><input type="text" id="title"></label>
 <label>Content:<br><textarea id="content"></textarea></label>
-<label>Images:<br><input type="file" id="images" multiple accept="image/*"></label>
+<label>Images:<br>
+<input type="file" id="images" multiple accept="image/*" capture="environment">
+</label>
 <div id="previewContainer"></div>
 
 <button id="saveBtn">Save Draft</button>
@@ -129,9 +132,20 @@ document.getElementById('exportBtn').addEventListener('click', async ()=>{
     doc.addImage(dataUrl,'JPEG',12,y,w,h);
     y+=h+6;
   }
-  doc.save(`${document.getElementById('title').value||'demo'}.pdf`);
+
+  // iOS/Android safe save
+  const fileName = `${document.getElementById('title').value||'demo'}.pdf`;
+  if(navigator.msSaveBlob){ // IE
+    navigator.msSaveBlob(doc.output('blob'), fileName);
+  }else{
+    const link = document.createElement('a');
+    link.href = doc.output('bloburl');
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 });
 </script>
 </body>
 </html>
-
