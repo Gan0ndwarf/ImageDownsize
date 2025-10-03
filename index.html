@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Draft + IndexedDB Image Demo</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+body{font-family:sans-serif; padding:20px;}
+label{display:block; margin-top:10px;}
+img.preview{max-width:120px; margin:4px; border:1px solid #ccc; border-radius:6px;}
+textarea{width:98%; height:80px;}
+button{margin:5px; padding:6px 12px;}
+</style>
+</head>
+<body>
+<h1>Demo Form</h1>
+
+<label>Title:<br><input type="text" id="title"></label>
+<label>Content:<br><textarea id="content"></textarea></label>
+<label>Images:<br><input type="file" id="images" multiple accept="image/*"></label>
+<div id="previewContainer"></div>
+
+<button id="saveBtn">Save Draft</button>
+<button id="loadBtn">Load Draft</button>
+<button id="exportBtn">Export PDF</button>
+
+<script>
+// --- IndexedDB helper ---
+function openDB(){
+  return new Promise((res,rej)=>{
+    const rq = indexedDB.open('demo_images',1);
+    rq.onupgradeneeded = e => e.target.result.createObjectStore('images',{keyPath:'id'});
+    rq.onsuccess = e => res(e.target.result);
+    rq.onerror = e => rej(e.target.error);
+  });
+}
+
+async function putBlob(id, blob){
+  const db = await openDB();
+  return new Promise((res,rej)=>{
+    const tx = db.transaction('images','readwrite');
+    tx.objectStore('images').put({id, blob});
+    tx.oncomplete = ()=>res(true);
+    tx.onerror = e=>rej(e.target.error);
+  });
+}
+
+async function getBlob(id){
+  const db = await openDB();
+  return new Promise((res,rej)=>{
+    const rq = db.transaction('images').objectStore('images').get(id);
+    rq.onsuccess = e=>res(e.target.result? e.target.result.blob:null);
+    rq.onerror = e=>rej(e.target.error);
+  });
+}
+
+// --- helpers ---
+function genId(){return 'img_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8);}
+function renderImage(url){ 
+  const img = document.createElement('img'); img.src=url; img.className='preview'; 
+  document.getElementById('previewContainer').appendChild(img);
+}
+function clearPreview(){document.getElementById('previewContainer').innerHTML='';}
+
+// convert blob -> dataURL
+function blobToDataURL(blob){return new Promise(res=>{const fr=new FileReader(); fr.onload=e=>res(e.target.result); fr.readAsDataURL(blob);});}
+
+// --- form logic ---
+let imageRefs = [];
+
+document.getElementById('images').addEventListener('change', async e=>{
+  clearPreview();
+  const files = Array.from(e.target.files || []);
+  for(const file of files){
+    const id = genId();
+    await putBlob(id, file);
+    imageRefs.push(id);
+    renderImage(URL.createObjectURL(file));
+  }
+});
+
+document.getElementById('saveBtn').addEventListener('click',()=>{
+  const draft = {
+    title: document.getElementById('title').value,
+    content: document.getElementById('content').value,
+    images: imageRefs
+  };
+  localStorage.setItem('demo_draft', JSON.stringify(draft));
+  alert('Draft saved!');
+});
+
+document.getElementById('loadBtn').addEventListener('click', async ()=>{
+  clearPreview();
+  const draft = JSON.parse(localStorage.getItem('demo_draft'));
+  if(!draft){alert('No draft found'); return;}
+  document.getElementById('title').value = draft.title;
+  document.getElementById('content').value = draft.content;
+  imageRefs = draft.images || [];
+  for(const id of imageRefs){
+    const blob = await getBlob(id);
+    if(blob) renderImage(URL.createObjectURL(blob));
+  }
+});
+
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  let y=20;
+  doc.setFontSize(16); doc.text(document.getElementById('title').value, 10, y); y+=10;
+  doc.setFontSize(12); 
+  const contentLines = doc.splitTextToSize(document.getElementById('content').value,180);
+  contentLines.forEach(line=>{if(y>280){doc.addPage();y=20;} doc.text(line,12,y); y+=6;});
+  for(const id of imageRefs){
+    const blob = await getBlob(id);
+    if(!blob) continue;
+    const dataUrl = await blobToDataURL(blob);
+    const props = doc.getImageProperties(dataUrl);
+    const w=80; const h=(props.height/props.width)*w;
+    if(y+h>280){doc.addPage();y=20;}
+    doc.addImage(dataUrl,'JPEG',12,y,w,h);
+    y+=h+6;
+  }
+  doc.save(`${document.getElementById('title').value||'demo'}.pdf`);
+});
+</script>
+</body>
+</html>
